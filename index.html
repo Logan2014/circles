@@ -1,0 +1,381 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Geometric Figures</title>
+  <style>
+    body { 
+      margin: 0; 
+      overflow: hidden; 
+      font: 20px sans-serif; 
+    }
+    canvas { 
+      display: block;
+      touch-action: none; 
+    }
+    #controls { 
+      position: absolute; 
+      top: 1rem; 
+      left: 1rem; 
+      padding: 1rem; 
+      display: flex;
+      gap: 0.5rem;
+    }
+    button {
+      font: inherit; 
+    }
+  </style>
+</head>
+<body>
+  <aside id="controls">
+    <button onclick="reset()">Reset</button>
+    <button onclick="about()">About</button>
+  </aside>
+  <canvas id="canvas"></canvas>
+  <script>
+    const canvasStyle = {
+      clickRadius: 22, // half of recomended by iOS guides 44px touch target
+      gapSize: 5,
+      pointRadius: 2.5,
+      pointColor: 'black',
+      intersectionColor: 'red',
+      firstCircleColor: 'blue',
+      secondCircleColor: 'yellow',
+      font: 'bold 1rem sans-serif'
+    }
+    const canvas = document.getElementById('canvas');
+    const ctx = canvas.getContext('2d');
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+
+    class Shape {
+      constructor() {
+        if (new.target === Shape) {
+          throw new Error("Cannot instantiate abstract class directly");
+        }
+      }
+
+      toString() {
+        throw new Error("Method 'toString()' must be implemented");
+      }
+
+      isEqual(shape, epsilon = Number.EPSILON) {
+        throw new Error("Method 'isEqual()' must be implemented");
+      }
+
+      getPosition() {
+        throw new Error("Method 'getPosition()' must be implemented");
+      }
+
+      distanceTo(shape) {
+        const selfPosition = this.getPosition();
+        const shapePosition = shape.getPosition();
+        return Math.hypot(selfPosition.x - shapePosition.x, selfPosition.y - shapePosition.y);
+      }
+    }
+
+    class Point extends Shape {
+      constructor(x, y, label = '') {
+        super();
+        this.x = x;
+        this.y = y;
+        this.label = label;
+      }
+
+      static fromPoint(point, label = '') {
+        return new Point(point.x, point.y, label ?? point.label);
+      }
+
+      toString() {
+        return `${this.label}(${this.x.toFixed(0)}, ${this.y.toFixed(0)})`;
+      }
+
+      isEqual(point, epsilon = Number.EPSILON) {
+        return Math.abs(this.x - point.x) < epsilon && Math.abs(this.y - point.y) < epsilon;
+      }
+
+      getPosition() {
+        return this;
+      }
+    }
+
+    class Circle extends Shape {
+      constructor(center, radius, label = '') {
+        super();
+        this.center = center;
+        this.radius = radius;
+        this.label = label;
+      }
+
+      toString() {
+        return `${this.label} Circle: ${this.label}(${this.center.x.toFixed(1)}, ${this.center.y.toFixed(1)}), Radius: ${this.radius.toFixed(1)}`;
+      }
+
+      isEqual(circle, epsilon = Number.EPSILON) {
+        return this.center.isEqual(circle.center, epsilon) && Math.abs(this.radius - circle.radius) < epsilon;
+      }
+
+      getPosition() {
+        return this.center;
+      }
+
+      getIntersectionPointsWith(circle) {
+        const dx = circle.center.x - this.center.x;
+        const dy = circle.center.y - this.center.y;
+        const circlesDistance = this.distanceTo(circle);
+
+        if (
+          this.radius + circle.radius < circlesDistance // circles are too far apart
+          || circlesDistance < Math.abs(this.radius - circle.radius)  // one circle is inside the other
+          || this.center.isEqual(circle.center) // circles are coincident
+        ) return [];
+
+        // projecttion of intersection points to the line between circles center
+        const a = (this.radius * this.radius - circle.radius * circle.radius + circlesDistance * circlesDistance) / (2 * circlesDistance);
+        // distance from line between circles centers to intersection points
+        const h = Math.sqrt(this.radius * this.radius - a * a);
+
+        const xm = this.center.x + a * dx / circlesDistance;
+        const ym = this.center.y + a * dy / circlesDistance;
+
+        const rx = -dy * (h / circlesDistance);
+        const ry = dx * (h / circlesDistance);
+
+        return [
+          new Point(xm + rx, ym + ry, 'I1'),
+          new Point(xm - rx, ym - ry, 'I2')
+        ];
+      }
+    }
+
+    class ShapeManager {
+      #points = [];
+
+      constructor() {
+        if (new.target === ShapeManager) {
+          throw new Error("Cannot instantiate abstract class directly");
+        }
+      }
+
+      isDataComplete() {
+        throw new Error("Method 'isDataComplete()' must be implemented");
+      }
+
+      clearData() {
+        this.#points = [];
+      }
+
+      pointsCount() {
+        return this.#points.length;
+      } 
+
+      addPoint(point) {
+        if (!this.isDataComplete()) {
+          this.#points.push(point);
+        } else  {
+          console.warn('Data is already ready, cannot add more points.');
+        }
+      }
+
+      getNearbyPoint(referencePoint, radius) {
+        return this.#points.find(point => point.distanceTo(referencePoint) < radius);
+      }
+
+      drawPoints(ctx) {
+        this.#points.forEach(point => {
+          ShapeManager.drawPoint(ctx, point, canvasStyle.pointRadius);
+        });
+      }
+
+      static drawPoint(ctx, point, radius = canvasStyle.pointRadius, color = canvasStyle.pointColor, gapSize = canvasStyle.gapSize) {
+        ctx.beginPath();
+        ShapeManager.drawArc(ctx, point, radius);
+        ctx.fillStyle = color;
+        ctx.fill();
+        ctx.fillText(point, point.x + gapSize, point.y - gapSize);
+      }
+
+      static drawArc(ctx, point, radius) {
+        ctx.arc(point.x, point.y, radius, 0, 2 * Math.PI);
+      }
+    }
+
+    class CircleManager extends ShapeManager {
+      #centerLabel = '';
+      #circleLabel = '';
+      #centerPoint = null;
+      #circlePoint = null;
+
+      constructor(centerLabel = '', circleLabel = '') {
+        super();
+        this.#centerLabel = centerLabel;
+        this.#circleLabel = circleLabel; 
+      }
+
+      isDataComplete() {
+        return this.pointsCount() === 2;
+      }
+
+      clearData() {
+        this.#centerPoint = null;
+        this.#circlePoint = null;
+        super.clearData();
+      }
+
+      addPoint(point) {
+        if (this.isDataComplete()) {
+          console.warn('Circle already has center and circle point.');
+        } else if (this.pointsCount() < 1) {
+          this.#centerPoint = Point.fromPoint(point, this.#centerLabel);
+          super.addPoint(this.#centerPoint);
+        } else {
+          this.#circlePoint = Point.fromPoint(point, this.#circleLabel);
+          super.addPoint(this.#circlePoint);
+        }
+      }
+
+      getRadius() {
+        const dx = this.#centerPoint.x - this.#circlePoint.x;
+        const dy = this.#centerPoint.y - this.#circlePoint.y;
+        return Math.hypot(dx, dy);
+      }     
+      
+      getCircle() {
+        if (!this.isDataComplete()) {
+          console.warn('Could not get circle, not enough points.');
+          return null;
+        }
+
+        return new Circle(this.#centerPoint, this.getRadius());
+      }
+
+      drawCircle(ctx, circleColor) {
+        if (this.isDataComplete()) {
+          ctx.beginPath();
+          ShapeManager.drawArc(ctx, this.#centerPoint, this.getRadius());
+          ctx.strokeStyle = circleColor;
+          ctx.stroke();
+        } else {
+          console.warn('Coult not draw circle, not enough points.');
+        }
+      }
+    }
+
+    class CircleIntersectionManager extends ShapeManager {
+      #firstCircleManager = null;
+      #secondCircleManager = null;
+
+      constructor(firstCircleManager, secondCircleManager) {
+        super();
+        this.#firstCircleManager = firstCircleManager;
+        this.#secondCircleManager = secondCircleManager;
+      }
+
+      isDataComplete() {
+        return this.#firstCircleManager.isDataComplete() && this.#secondCircleManager.isDataComplete();
+      }
+
+      clearData() {
+        this.#firstCircleManager.clearData();
+        this.#secondCircleManager.clearData();
+      }
+
+      addPoint(point) {
+        if (this.isDataComplete()) {
+          console.warn('Only 4 points are expected for circles intersection.');
+        } else if (!this.#firstCircleManager.isDataComplete()) {
+          this.#firstCircleManager.addPoint(point);
+        } else {
+          this.#secondCircleManager.addPoint(point);
+        }
+      }
+
+      getNearbyPoint(referencePoint, radius) {
+        return this.#firstCircleManager.getNearbyPoint(referencePoint, radius) ??
+               this.#secondCircleManager.getNearbyPoint(referencePoint, radius);
+      } 
+
+      draw(ctx) {
+        this.#firstCircleManager.isDataComplete() && this.#firstCircleManager.drawCircle(ctx, canvasStyle.firstCircleColor);
+        this.#secondCircleManager.isDataComplete() && this.#secondCircleManager.drawCircle(ctx, canvasStyle.secondCircleColor);
+
+        this.#firstCircleManager.drawPoints(ctx);
+        this.#secondCircleManager.drawPoints(ctx);
+
+        if (this.isDataComplete()) {
+          this.#firstCircleManager.getCircle().getIntersectionPointsWith(this.#secondCircleManager.getCircle()).forEach(point => {
+            ShapeManager.drawPoint(ctx, point, canvasStyle.pointRadius, canvasStyle.intersectionColor);
+          });
+        }
+      }
+    }
+
+    const circleIntersectionManager = new CircleIntersectionManager(
+      new CircleManager('A', 'B'),
+      new CircleManager('C', 'D')
+    );
+
+    let draggingPoint = null;
+
+    canvas.addEventListener('pointerdown', e => {
+      const pos = getMousePos(e);
+      const point = new Point(pos.x, pos.y);
+      draggingPoint = circleIntersectionManager.getNearbyPoint(point, canvasStyle.clickRadius);
+
+      if (draggingPoint) {
+        return;
+      }
+
+      if (!circleIntersectionManager.isDataComplete()) {
+        circleIntersectionManager.addPoint(point);
+      }
+
+      draw();
+    });
+
+    canvas.addEventListener('pointermove', e => {
+      if (draggingPoint) {
+        const pos = getMousePos(e);
+        draggingPoint.x = pos.x;
+        draggingPoint.y = pos.y;
+        draw();
+      }
+    });
+
+    canvas.addEventListener('pointerup', () => draggingPoint = null);
+
+    function getMousePos(evt) {
+      const rect = canvas.getBoundingClientRect();
+      return {
+        x: evt.clientX - rect.left,
+        y: evt.clientY - rect.top
+      };
+    }
+
+    function draw() {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.font = canvasStyle.font;
+
+      circleIntersectionManager.draw(ctx);
+    }
+
+    function reset() {
+      circleIntersectionManager.clearData();
+
+      draw();
+    }
+
+    function about() {
+      alert(`
+        Circle Construction from 4 Points
+        Author: Volodymyr Ovcharenko feat. ChatGPT
+        Description: 
+        Select points A, B, C, and D. Two circles and their intersection points will be constructed. Drag the points to update. The 'Reset' button clears the field.
+      `);
+    }
+
+    draw();
+  </script>
+</body>
+</html>
